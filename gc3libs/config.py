@@ -400,15 +400,12 @@ class Configuration(gc3libs.utils.Struct):
                                 filename=filename
                             ))
 
-                for key in self.resource_key_value_matcher.keys():
-                    if key in config_items and re.compile(self.resource_key_value_matcher[key][0]).match(config_items[key]):
-                            raise gc3libs.exceptions.ConfigurationError(
-                                "Found problem with value for '{k}' in section '{s}', '{p}'".format(
-                                    k=key,
-                                    s=sectname,
-                                    p=self.resource_key_value_matcher[key][1]
-                                )
-                            )
+                for key in self._resource_keys_value_required:
+                    if key in config_items and not config_items[key]:
+                        raise gc3libs.exceptions.ConfigurationError(
+                            "Found empty configuration key `{key}`"
+                            " in section [{sectname}]"
+                            .format(key=key, sectname=sectname))
 
                 resources[name].update(config_items)
                 resources[name]['name'] = name
@@ -447,18 +444,16 @@ class Configuration(gc3libs.utils.Struct):
         'type',
     )
 
-    # config keys that are supposed to have a pattern
-    resource_key_value_matcher = {
-        'keypair_name': (r'/^$|\s+/', 'cannot be empty'),
-        'public_key': (r'\w*.pub\b', 'public keys need to end in .pub')
-    }
+    # config keys that are not allowed to have empty values
+    _resource_keys_value_required = (
+        'keypair_name',
+    )
 
     _renamed_keys = {
         # old key name           new key name
         # ===================    ===================
         'ncores'               : 'max_cores',
         'sge_accounting_delay' : 'accounting_delay',
-        'override'             : 'discover'
     }
 
     @staticmethod
@@ -703,15 +698,12 @@ class Configuration(gc3libs.utils.Struct):
                     "Missing required parameter '{key}'"
                     " in definition of resource '{name}'."
                     .format(key=key, name=resdict['name']))
-        for key in self.resource_key_value_matcher.keys():
-            if key in resdict and re.compile(self.resource_key_value_matcher[key][0]).match(resdict[key]):
+        for key in self._resource_keys_value_required:
+            if key in resdict and not resdict[key]:
                 raise gc3libs.exceptions.ConfigurationError(
-                        "Found problem with value for '{k}' in section '{s}', '{p}'".format(
-                            k=key,
-                            s=resdict,
-                            p=self.resource_key_value_matcher[key][1]
-                        )
-                )
+                    "Found empty configuration key `{key}`"
+                    " in definition of resource '{name}'."
+                    .format(key=key, name=resdict['name']))
 
         if resdict['type'] in self._removed_resource_types:
             resdict['enabled'] = False

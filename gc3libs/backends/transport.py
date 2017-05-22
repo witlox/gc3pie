@@ -25,6 +25,7 @@ via SSH.
 __docformat__ = 'reStructuredText'
 
 
+import platform
 import os
 import os.path
 import errno
@@ -437,10 +438,6 @@ class SshTransport(Transport):
         Additional arguments ``user``, ``port``, ``keyfile``, and
         ``timeout``, if given, override the above settings.
         """
-        self.remote_frontend = remote_frontend
-        self.port = port
-        self.username = username
-
         self.ssh = paramiko.SSHClient()
         self.ignore_ssh_host_keys = ignore_ssh_host_keys
         self.sftp = None
@@ -448,21 +445,31 @@ class SshTransport(Transport):
         self.transport_channel = None
 
         # use SSH options, if available
-        sshcfg = paramiko.SSHConfig()
+        self._ssh_config = paramiko.SSHConfig()
         config_filename = os.path.expanduser(ssh_config or gc3libs.Default.SSH_CONFIG_FILE)
         if os.path.exists(config_filename):
             with open(config_filename, 'r') as config_file:
-                sshcfg.parse(config_file)
-            # check if we have an ssh configuration stanza for this host
-            ssh_options = sshcfg.lookup(self.remote_frontend)
-        else:
-            # no options
-            ssh_options = {}
+                self._ssh_config.parse(config_file)
+
+        self.set_connection_params(remote_frontend, username, keyfile, port, timeout)
+
+
+    def set_connection_params(self, hostname, username=None, keyfile=None,
+                               port=None, timeout=None):
+        """
+        Set remote host name and other parameters used for new connections.
+        Currently-established connections are not affected.
+
+        The host name is the only mandatory argument; any other parameter will
+        be read from the SSH configuration file (unless explicitly provided to
+        this function).
+        """
+        # check if we have an ssh configuration stanza for this host
+        ssh_options = self._ssh_config.lookup(hostname)
 
         # merge SSH options from the SSH config file with parameters
         # we were given in this method call
-        if 'hostname' in ssh_options:
-            self.remote_frontend = ssh_options['hostname']
+        self.remote_frontend = ssh_options.get('hostname', hostname)
 
         if username is None:
             self.username = ssh_options.get('user', None)
@@ -471,7 +478,7 @@ class SshTransport(Transport):
             self.username = username
 
         if port is None:
-            self.port = ssh_options.get('port', gc3libs.Default.SSH_PORT)
+            self.port = int(ssh_options.get('port', gc3libs.Default.SSH_PORT))
         else:
             self.port = int(port)
 
@@ -482,8 +489,8 @@ class SshTransport(Transport):
             self.keyfile = keyfile
 
         if timeout is None:
-            self.timeout = ssh_options.get('connecttimeout',
-                                           gc3libs.Default.SSH_CONNECT_TIMEOUT)
+            self.timeout = float(ssh_options.get('connecttimeout',
+                                                 gc3libs.Default.SSH_CONNECT_TIMEOUT))
         else:
             self.timeout = float(timeout)
 
@@ -522,8 +529,8 @@ class SshTransport(Transport):
                         gc3libs.log.warning(
                             "Could not read 'known hosts' SSH keys (%s: %s)."
                             " I'm ignoring the error and continuing anyway,"
-                            " but this may mean trouble later on."
-                            % (err.__class__.__name__, err))
+                            " but this could mean trouble later on.",
+                            err.__class__.__name__, err)
                         pass
                 else:
                     gc3libs.log.info("Ignoring ssh host key file.")
@@ -553,7 +560,7 @@ class SshTransport(Transport):
         except Exception as ex:
             gc3libs.log.error(
                 "Could not create ssh connection to %s: %s: %s",
-                self.remote_frontend, ex.__class__.__name__, str(ex))
+                self.remote_frontend, ex.__class__.__name__, ex)
             self._is_open = False
 
             # Try to understand why the ssh connection failed.
@@ -849,7 +856,22 @@ class LocalTransport(Transport):
     _process = None
 
     def __init__(self):
-        pass
+        # logging code in class `Transport` assumes a host name is recorded
+        # into `.remote_frontend`
+        self.remote_frontend = (platform.node() or 'localhost')
+
+    # pylint: disable=too-many-arguments,unused-argument
+    def set_connection_params(self, hostname, username=None, keyfile=None,
+                              port=None, timeout=None):
+        """
+        Set the host name stored in this `LocalTransport` instance.
+        Any other argument is ignored.
+
+        This method exists only for interface compatibility with
+        :class:`SshTranport`, which see.
+        """
+        self.remote_frontend = hostname
+
 
     def get_proc_state(self, pid):
         """
